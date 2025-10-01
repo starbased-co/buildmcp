@@ -3,19 +3,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-
-def _parse_json_path(path: str) -> list[str]:
-    """Parse jq-style path expression into list of keys.
-
-    Args:
-        path: Path expression like '.profiles.default' or '.'
-
-    Returns:
-        List of keys to traverse
-    """
-    if path == ".":
-        return []
-    return path.lstrip(".").split(".")
+import dpath
 
 
 def read_json_path(file_path: Path, path: str = ".") -> Any:
@@ -35,11 +23,14 @@ def read_json_path(file_path: Path, path: str = ".") -> Any:
     """
     data = json.loads(file_path.read_text())
 
-    keys = _parse_json_path(path)
-    for key in keys:
-        data = data[key]
+    if path == ".":
+        return data
 
-    return data
+    dpath_str = path.lstrip(".").replace(".", "/")
+    try:
+        return dpath.get(data, dpath_str)
+    except KeyError as e:
+        raise KeyError(f"Path not found: {path}") from e
 
 
 def write_json_path(file_path: Path, value: Any, path: str = ".") -> None:
@@ -51,28 +42,18 @@ def write_json_path(file_path: Path, value: Any, path: str = ".") -> None:
         path: jq-style path expression (e.g., '.profiles.default', default '.')
 
     Raises:
-        FileNotFoundError: If file doesn't exist and path is not '.'
-        json.JSONDecodeError: If file contains invalid JSON
-        KeyError: If intermediate path doesn't exist
         OSError: If file cannot be written
     """
-    keys = _parse_json_path(path)
+    if file_path.exists():
+        data = json.loads(file_path.read_text())
+    else:
+        data = {}
 
-    if not keys:
+    if path == ".":
         data = value
     else:
-        if file_path.exists():
-            data = json.loads(file_path.read_text())
-        else:
-            data = {}
-
-        current = data
-        for key in keys[:-1]:
-            if key not in current:
-                current[key] = {}
-            current = current[key]
-
-        current[keys[-1]] = value
+        dpath_str = path.lstrip(".").replace(".", "/")
+        dpath.new(data, dpath_str, value)
 
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text(json.dumps(data, indent=2) + "\n")

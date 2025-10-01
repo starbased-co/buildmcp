@@ -53,14 +53,14 @@ class MCPBuilder:
             err_console.print(
                 f"[red]Error:[/red] Configuration file not found: {self.mcp_json}"
             )
-            raise tyro.cli.Exit(code=1)
+            raise SystemExit(1)
 
         try:
             with self.mcp_json.open() as f:
                 return json.load(f)
         except json.JSONDecodeError as e:
             err_console.print(f"[red]Error parsing JSON:[/red] {e}")
-            raise tyro.cli.Exit(code=1)
+            raise SystemExit(1)
 
     def substitute_env_vars(self, data: Any) -> Any:
         """Recursively substitute environment variables in the form ${VAR_NAME}."""

@@ -8,6 +8,7 @@ dependencies = [
     "rich",
     "tyro",
     "attrs",
+    "dpath>=2.2.0",
 ]
 
 [project.scripts]
@@ -19,3 +20,21 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/buildmcp"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "pytest-mock>=3.15.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--color=yes",
+    "--tb=short",
+    "--strict-markers",
+    "--strict-config",
+]
