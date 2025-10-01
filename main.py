@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and deploy MCP server configurations from templates to their respective pipes."""
+"""Build and deploy MCP server configurations from templates to their respective targets."""
 
 import json
 import os
@@ -15,6 +15,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from checksum import hash_json_data, read_json_path, write_json_path
+
 console = Console(stderr=True)
 err_console = Console(stderr=True)
 
@@ -23,7 +25,7 @@ err_console = Console(stderr=True)
 class MCPBuilder:
     """Manages building and deploying MCP configurations from templates."""
 
-    config_path: Path = Path.home() / ".config/nix/config/claude/mcp.json"
+    mcp_json: Path = Path.home() / ".claude/mcp.json"
     """Path to the MCP configuration file"""
 
     verbose: bool = False
@@ -35,17 +37,28 @@ class MCPBuilder:
     check_env: bool = True
     """Check for missing environment variables"""
 
+    force: bool = False
+    """Force write even if checksums match"""
+
     _missing_vars: set = attrs.field(factory=set, init=False)
     """Track missing environment variables"""
 
+    _profile_hashes: dict[str, str] = attrs.field(factory=dict, init=False)
+    """Track built profile hashes for lock file"""
+
+    _locked_hashes: dict[str, str] = attrs.field(factory=dict, init=False)
+    """Hashes from lock file"""
+
     def load_config(self) -> dict[str, Any]:
         """Load the MCP configuration from file."""
-        if not self.config_path.exists():
-            err_console.print(f"[red]Error:[/red] Configuration file not found: {self.config_path}")
+        if not self.mcp_json.exists():
+            err_console.print(
+                f"[red]Error:[/red] Configuration file not found: {self.mcp_json}"
+            )
             raise tyro.cli.Exit(code=1)
 
         try:
-            with self.config_path.open() as f:
+            with self.mcp_json.open() as f:
                 return json.load(f)
         except json.JSONDecodeError as e:
             err_console.print(f"[red]Error parsing JSON:[/red] {e}")
@@ -55,7 +68,7 @@ class MCPBuilder:
         """Recursively substitute environment variables in the form ${VAR_NAME}."""
         if isinstance(data, str):
             # Find all ${VAR_NAME} patterns
-            pattern = re.compile(r'\$\{([^}]+)\}')
+            pattern = re.compile(r"\$\{([^}]+)\}")
 
             def replace_var(match):
                 var_name = match.group(1)
@@ -74,7 +87,7 @@ class MCPBuilder:
                     # Show first/last 3 chars for sensitive data
                     if len(value) > 10 and any(
                         key in var_name.upper()
-                        for key in ['KEY', 'TOKEN', 'SECRET', 'PASSWORD']
+                        for key in ["KEY", "TOKEN", "SECRET", "PASSWORD"]
                     ):
                         display_value = f"{value[:3]}...{value[-3:]}"
                     else:
@@ -110,12 +123,16 @@ class MCPBuilder:
         servers = copy.deepcopy(base_servers) if base_servers else {}
 
         if base_servers and self.verbose:
-            console.print(f"  [dim]Starting with {len(base_servers)} base server(s)[/dim]")
+            console.print(
+                f"  [dim]Starting with {len(base_servers)} base server(s)[/dim]"
+            )
 
         # Add template servers (overriding base if name conflicts)
         for name in server_names:
             if name not in templates:
-                err_console.print(f"[yellow]Warning:[/yellow] Template '{name}' not found")
+                err_console.print(
+                    f"[yellow]Warning:[/yellow] Template '{name}' not found"
+                )
                 continue
 
             # Clone the template configuration (deep copy to avoid mutation)
@@ -126,102 +143,174 @@ class MCPBuilder:
 
         return servers
 
-    def execute_pipe(self, pipe_cmd: str, servers_json: dict[str, Any]) -> bool:
-        """Execute a pipe command with JSON input."""
-        json_str = json.dumps({"mcpServers": servers_json}, indent=2)
+    def load_lock_file(self) -> None:
+        """Load profile hashes from lock file."""
+        lock_path = self.mcp_json.with_suffix(".lock")
+        if lock_path.exists():
+            try:
+                self._locked_hashes = json.loads(lock_path.read_text())
+                if self.verbose:
+                    console.print(f"[dim]Loaded lock file: {lock_path}[/dim]")
+            except Exception as e:
+                if self.verbose:
+                    console.print(f"[yellow]Warning:[/yellow] Could not read lock file: {e}")
+
+    def save_lock_file(self) -> None:
+        """Save profile hashes to lock file."""
+        if not self._profile_hashes:
+            return
+
+        lock_path = self.mcp_json.with_suffix(".lock")
+        try:
+            lock_path.write_text(json.dumps(self._profile_hashes, indent=2) + "\n")
+            if self.verbose:
+                console.print(f"[dim]Updated lock file: {lock_path}[/dim]")
+        except Exception as e:
+            err_console.print(f"[yellow]Warning:[/yellow] Could not write lock file: {e}")
+
+    def write_target(
+        self, target_spec: str | dict[str, str], servers_json: dict[str, Any]
+    ) -> bool:
+        """Write configuration to target."""
+        json_data = {"mcpServers": servers_json}
+        json_str = json.dumps(json_data, indent=2)
 
         if self.dry_run:
-            console.print(f"[yellow]Would pipe to:[/yellow] {pipe_cmd}")
-            console.print(Panel(json_str, title="JSON to pipe", border_style="yellow"))
+            console.print(f"[yellow]Would write to:[/yellow] {target_spec}")
+            console.print(Panel(json_str, title="JSON to write", border_style="yellow"))
             return True
 
         try:
-            result = subprocess.run(
-                pipe_cmd,
-                input=json_str,
-                text=True,
-                shell=True,
-                capture_output=True,
-            )
-
-            # Check for success indicators in output
-            output = (result.stdout or "") + (result.stderr or "")
-            success_patterns = [
-                "Configuration saved successfully",
-                "successfully",
-                "Success",
-                "Updated",
-                "Complete"
-            ]
-
-            has_success_message = any(
-                pattern.lower() in output.lower()
-                for pattern in success_patterns
-            )
-
-            # Consider it successful if either:
-            # 1. Return code is 0
-            # 2. Output contains success message (even with non-zero return code)
-            if result.returncode == 0 or has_success_message:
-                if self.verbose and result.stdout:
-                    console.print(f"[dim]Output:[/dim] {result.stdout}")
-
-                # Show stderr as info if there's a success message
-                if result.stderr and has_success_message:
-                    console.print(f"  [green]✓[/green] {result.stderr.strip()}")
-
+            if isinstance(target_spec, str) and target_spec.endswith(".json"):
+                target_path = Path(target_spec).expanduser()
+                write_json_path(target_path, servers_json, ".mcpServers")
+                console.print(f"  [green]✓[/green] Wrote to {target_path}")
                 return True
+
+            elif isinstance(target_spec, dict) and "write" in target_spec:
+                write_cmd = target_spec["write"]
+                result = subprocess.run(
+                    write_cmd,
+                    input=json_str,
+                    text=True,
+                    shell=True,
+                    capture_output=True,
+                )
+
+                output = (result.stdout or "") + (result.stderr or "")
+                success_patterns = [
+                    "Configuration saved successfully",
+                    "successfully",
+                    "Success",
+                    "Updated",
+                    "Complete",
+                ]
+
+                has_success_message = any(
+                    pattern.lower() in output.lower() for pattern in success_patterns
+                )
+
+                if result.returncode == 0 or has_success_message:
+                    if self.verbose and result.stdout:
+                        console.print(f"[dim]Output:[/dim] {result.stdout}")
+                    if result.stderr and has_success_message:
+                        console.print(f"  [green]✓[/green] {result.stderr.strip()}")
+                    return True
+                else:
+                    err_console.print(f"[red]Command failed:[/red] {write_cmd}")
+                    if result.stderr:
+                        err_console.print(f"[red]Error:[/red] {result.stderr}")
+                    elif result.stdout:
+                        err_console.print(f"[red]Output:[/red] {result.stdout}")
+                    return False
             else:
-                err_console.print(f"[red]Command failed:[/red] {pipe_cmd}")
-                if result.stderr:
-                    err_console.print(f"[red]Error:[/red] {result.stderr}")
-                elif result.stdout:
-                    err_console.print(f"[red]Output:[/red] {result.stdout}")
+                err_console.print(
+                    f"[red]Error:[/red] Invalid target specification: {target_spec}"
+                )
                 return False
 
         except Exception as e:
-            err_console.print(f"[red]Failed to execute pipe:[/red] {e}")
+            err_console.print(f"[red]Failed to write target:[/red] {e}")
             return False
 
     def process_target(
         self,
-        target_name: str,
+        profile_name: str,
         server_names: list[str],
-        pipe_cmd: str,
+        target_spec: str | dict[str, str],
         templates: dict[str, Any],
         base_servers: dict[str, Any] | None = None,
     ) -> bool:
-        """Process a single target by building and piping its configuration."""
-        console.print(f"\n[bold cyan]Processing target:[/bold cyan] {target_name}")
+        """Process a single profile/target by building and writing its configuration."""
+        console.print(f"\n[bold cyan]Processing profile:[/bold cyan] {profile_name}")
 
         # Build the servers JSON from base servers and templates
         servers = self.build_servers_json(server_names, templates, base_servers)
 
         if not servers:
-            console.print(f"  [yellow]No valid servers for target {target_name}[/yellow]")
+            console.print(
+                f"  [yellow]No valid servers for profile {profile_name}[/yellow]"
+            )
             return True
 
         console.print(f"  [green]Built {len(servers)} server(s)[/green]")
 
-        # Substitute environment variables before piping
+        # Substitute environment variables
         if self.verbose:
             console.print("  [cyan]Substituting environment variables...[/cyan]")
 
         servers = self.substitute_env_vars(servers)
 
-        # Execute the pipe command
-        return self.execute_pipe(pipe_cmd, servers)
+        # Compute hash of built configuration
+        built_hash = hash_json_data(servers)
+        self._profile_hashes[profile_name] = built_hash
+
+        if self.verbose:
+            console.print(f"  [dim]Built config hash: {built_hash[:16]}...[/dim]")
+
+        # Check if we need to write (compare with locked hash)
+        should_write = self.force
+
+        if not self.force:
+            locked_hash = self._locked_hashes.get(profile_name)
+            if locked_hash:
+                if locked_hash == built_hash:
+                    console.print(
+                        f"  [yellow]⊘[/yellow] Skipping (unchanged, use --force to override)"
+                    )
+                    return True
+                else:
+                    if self.verbose:
+                        console.print(
+                            f"  [dim]Lock hash differs: {locked_hash[:16]}...[/dim]"
+                        )
+                    should_write = True
+            else:
+                should_write = True
+
+        # Write to target
+        if should_write:
+            return self.write_target(target_spec, servers)
+
+        return True
 
     def run(self) -> None:
         """Execute the MCP configuration build and deployment."""
         # Load configuration
         config = self.load_config()
 
-        # Extract configuration sections
+        # Load lock file
+        self.load_lock_file()
+
+        # Extract configuration sections (new structure)
         base_servers = config.get("mcpServers", {})
         templates = config.get("templates", {})
+        profiles = config.get("profiles", {})
         targets = config.get("targets", {})
-        pipes = config.get("pipes", {})
+
+        if not profiles:
+            console.print("[yellow]No profiles defined in configuration[/yellow]")
+            return
 
         if not targets:
             console.print("[yellow]No targets defined in configuration[/yellow]")
@@ -234,36 +323,36 @@ class MCPBuilder:
             table.add_column("Count", style="green")
             table.add_row("Base Servers", str(len(base_servers)))
             table.add_row("Templates", str(len(templates)))
+            table.add_row("Profiles", str(len(profiles)))
             table.add_row("Targets", str(len(targets)))
-            table.add_row("Pipes", str(len(pipes)))
             console.print(table)
 
-        # Process each target
+        # Process each profile/target
         success_count = 0
-        for target_name, server_names in targets.items():
-            if target_name not in pipes:
+        for profile_name, server_names in profiles.items():
+            if profile_name not in targets:
                 err_console.print(
-                    f"[red]Error:[/red] No pipe defined for target '{target_name}'"
+                    f"[red]Error:[/red] No target defined for profile '{profile_name}'"
                 )
                 continue
 
-            pipe_cmd = pipes[target_name]
+            target_spec = targets[profile_name]
 
-            # Skip placeholder pipes
-            if "<jq command" in pipe_cmd or "reads server config" in pipe_cmd:
-                console.print(
-                    f"\n[yellow]Skipping target '{target_name}':[/yellow] "
-                    "Pipe command appears to be a placeholder"
-                )
-                continue
-
-            if self.process_target(target_name, server_names, pipe_cmd, templates, base_servers):
+            if self.process_target(
+                profile_name, server_names, target_spec, templates, base_servers
+            ):
                 success_count += 1
             else:
-                err_console.print(f"[red]Failed to process target:[/red] {target_name}")
+                err_console.print(f"[red]Failed to process profile:[/red] {profile_name}")
 
         # Summary
-        console.print(f"\n[green]✓[/green] Processed {success_count}/{len(targets)} targets")
+        console.print(
+            f"\n[green]✓[/green] Processed {success_count}/{len(profiles)} profiles"
+        )
+
+        # Save lock file with updated hashes
+        if not self.dry_run:
+            self.save_lock_file()
 
         # Report missing environment variables
         if self._missing_vars and self.check_env:
@@ -283,3 +372,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
