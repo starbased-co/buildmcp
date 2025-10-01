@@ -1,11 +1,9 @@
-#!/usr/bin/env python3
 """Build and deploy MCP server configurations from templates to their respective targets."""
 
 import json
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +13,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from checksum import hash_json_data, read_json_path, write_json_path
+from buildmcp.checksum import hash_json_data, write_json_path
 
 console = Console(stderr=True)
 err_console = Console(stderr=True)
@@ -368,8 +366,3 @@ def main() -> None:
     """CLI entry point."""
     builder = tyro.cli(MCPBuilder)
     builder.run()
-
-
-if __name__ == "__main__":
-    main()
-
