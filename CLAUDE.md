@@ -4,13 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This project contains two main tools for working with MCP (Model Context Protocol) servers:
-
-### buildmcp
 Python CLI tool that builds and deploys MCP server configurations from templates to various targets (Claude Code, MCPNest, etc.). It manages the transformation and deployment of MCP server configurations with environment variable substitution.
-
-### Meta∞MCP
-Terminal User Interface (TUI) for managing MCP servers through the MetaMCP web application API. Provides interactive browsing, creation, deletion, and bulk import of MCP server configurations.
 
 ## Development Commands
 
@@ -30,7 +24,6 @@ uv run buildmcp            # Via package script
 
 ### Common Operations
 
-#### buildmcp
 ```bash
 # Build and deploy MCP configurations
 uv run buildmcp --verbose                      # Show detailed output
@@ -38,20 +31,6 @@ uv run buildmcp --dry-run                      # Preview without executing
 uv run buildmcp --no-check-env                 # Skip env var validation
 uv run buildmcp --force                        # Force write even if unchanged
 uv run buildmcp --mcp-json <path>              # Use custom config file
-```
-
-#### Meta∞MCP
-```bash
-# Launch TUI for managing MCP servers
-export METAMCP_SESSION_TOKEN="your-token"      # Set session token
-uv run metamcp                                 # Launch TUI (localhost:12008)
-uv run metamcp --base-url http://host:port     # Connect to remote instance
-uv run metamcp --cookie-file ~/.metamcp        # Use cookie file for auth
-
-# Extract session token from browser
-# 1. Open DevTools → Application → Cookies
-# 2. Copy value of 'better-auth.session_token'
-# 3. URL-decode if needed
 ```
 
 ## Architecture
@@ -71,24 +50,7 @@ uv run metamcp --cookie-file ~/.metamcp        # Use cookie file for auth
 - Maintains `.lock` files to track configuration changes
 - Supports reading/writing JSON at specific paths
 
-#### Meta∞MCP
-
-**MetaMCPClient** (`metamcp.py`): API client for MetaMCP tRPC endpoints
-- Implements 6 core operations: list, create, delete, bulk_import, update_tool_status, update_server_status
-- Session-based authentication using better-auth cookies
-- Full type hints with `@attrs.define` data models
-- HTTP client using `httpx` library
-- Namespace operations for managing tool and server status
-
-**MetaMCPApp** (`metamcp_tui.py`): Textual-based TUI application
-- Tabbed interface with Servers and Namespaces tabs
-- Servers tab: Interactive DataTable for browsing servers
-- Namespaces tab: Buttons for tool and server status updates
-- Form screens for creating servers, bulk importing, and namespace operations
-- Keyboard shortcuts: q (quit), r (refresh), c (create), d (delete), i (import)
-- Real-time notifications and error handling
-
-### buildmcp Configuration Flow
+### Configuration Flow
 
 1. **Source**: `mcp.json` contains:
    - `templates`: Reusable MCP server definitions
@@ -122,7 +84,7 @@ uv run metamcp --cookie-file ~/.metamcp        # Use cookie file for auth
 }
 ```
 
-### buildmcp Key Design Patterns
+### Key Design Patterns
 
 - **Profile Composition**: Profiles combine multiple template servers
 - **Environment Variables**: `${VAR_NAME}` replaced at build time
@@ -133,37 +95,6 @@ uv run metamcp --cookie-file ~/.metamcp        # Use cookie file for auth
   - MCPNest: `"transport": {"type": "stdio"}` nested
 - **Dry Run Support**: Preview all operations before execution
 - **Missing Variable Tracking**: Collects and reports all missing env vars
-
-### Meta∞MCP API Flow
-
-```
-User Action (TUI)
-    ↓
-MetaMCPApp.action_*()
-    ↓
-MetaMCPClient._make_request()
-    ↓
-HTTP POST/GET (httpx)
-    ↓
-MetaMCP tRPC API (localhost:12008)
-    ↓
-Database (PostgreSQL/SQLite)
-```
-
-**Supported Operations:**
-
-MCP Servers:
-- **List**: `GET /trpc/frontend.mcpServers.list?batch=1&input=%7B%7D`
-- **Create**: `POST /trpc/frontend.mcpServers.create?batch=1`
-- **Delete**: `POST /trpc/frontend.mcpServers.delete?batch=1`
-- **Bulk Import**: `POST /trpc/frontend.mcpServers.bulkImport?batch=1`
-
-Namespaces:
-- **Update Tool Status**: `POST /trpc/frontend.namespaces.updateToolStatus?batch=1`
-- **Update Server Status**: `POST /trpc/frontend.namespaces.updateServerStatus?batch=1`
-
-**Authentication:** Session token from `better-auth.session_token` cookie
-**Data Format:** tRPC batch format with `{"0": {...}}` payload wrapper
 
 ## Working with MCP Formats
 
@@ -219,44 +150,26 @@ buildmcp/
 ├── src/buildmcp/
 │   ├── __init__.py
 │   ├── __main__.py
-│   ├── builder.py        # MCPBuilder class for buildmcp CLI
-│   ├── checksum.py       # Checksum and lock file utilities
-│   ├── metamcp.py        # MetaMCP API client
-│   └── metamcp_tui.py    # Meta∞MCP TUI application
-├── docs/
-│   ├── metamcp.md        # Meta∞MCP documentation
-│   └── metamcp-deploy.md # Original proof-of-concept docs
-├── har/                  # HTTP Archive files for API reference
-│   ├── list.har
-│   ├── create.har
-│   ├── delete.har
-│   ├── bulkImport.har
-│   ├── namespaces.updateToolStatus.har
-│   └── namespaces.updateServerStatus.har
+│   ├── builder.py        # MCPBuilder class
+│   └── checksum.py       # Checksum and lock file utilities
 ├── tests/                # Test suite (pytest)
 ├── pyproject.toml        # Project metadata and dependencies
 └── CLAUDE.md             # This file
-
 ```
 
 ### Module Organization
 
 - **buildmcp**: Template-based MCP configuration builder and deployer
-- **Meta∞MCP**: Interactive TUI for direct MCP server management via API
-- **Shared dependencies**: `attrs`, `tyro`, `rich`, `httpx`
-- **TUI framework**: `textual` for Meta∞MCP interface
+- **Dependencies**: `attrs`, `tyro`, `rich`, `dpath`
 
 ### Entry Points
 
 ```toml
 [project.scripts]
-buildmcp = "buildmcp.builder:main"    # Configuration builder
-metamcp = "buildmcp.metamcp_tui:main" # Meta∞MCP TUI
+buildmcp = "buildmcp.builder:main"
 ```
 
 ### Notes
 
 - **Tests**: Pytest configured in `pyproject.toml`, test files in `tests/`
-- **Configuration**: buildmcp config lives in user's nix config directory
-- **HAR files**: Capture real API requests for documentation and testing
-- **Documentation**: See `docs/metamcp.md` for complete Meta∞MCP guide
+- **Configuration**: Config lives in user's nix config directory (`~/.config/nix/config/claude/mcp.json`)

@@ -9,14 +9,10 @@ dependencies = [
     "tyro",
     "attrs",
     "dpath>=2.2.0",
-    "httpx>=0.28.1",
-    "textual>=6.2.1",
 ]
 
 [project.scripts]
 buildmcp = "buildmcp.builder:main"
-metamcp = "buildmcp.metamcp_tui:main"
-metamcp-cli = "buildmcp.metamcp_cli:main"
 
 [build-system]
 requires = ["hatchling"]
