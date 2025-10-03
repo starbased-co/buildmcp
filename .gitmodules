@@ -1,0 +1,3 @@
+[submodule "docs/metamcp"]
+	path = docs/metamcp
+	url = https://github.com/metatool-ai/metamcp
