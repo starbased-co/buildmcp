@@ -38,6 +38,9 @@ class MCPBuilder:
     force: bool = False
     """Force write even if checksums match"""
 
+    profile: str | None = None
+    """Print built config for specified profile to stdout instead of writing"""
+
     _missing_vars: set = attrs.field(factory=set, init=False)
     """Track missing environment variables"""
 
@@ -297,14 +300,40 @@ class MCPBuilder:
         # Load configuration
         config = self.load_config()
 
-        # Load lock file
-        self.load_lock_file()
-
         # Extract configuration sections (new structure)
         base_servers = config.get("mcpServers", {})
         templates = config.get("templates", {})
         profiles = config.get("profiles", {})
         targets = config.get("targets", {})
+
+        # Handle --profile flag: print built config to stdout and exit
+        if self.profile:
+            if self.profile not in profiles:
+                err_console.print(
+                    f"[red]Error:[/red] Profile '{self.profile}' not found in configuration"
+                )
+                raise SystemExit(1)
+
+            server_names = profiles[self.profile]
+            servers = self.build_servers_json(server_names, templates, base_servers)
+
+            if not servers:
+                err_console.print(
+                    f"[yellow]Warning:[/yellow] No valid servers for profile {self.profile}"
+                )
+                raise SystemExit(1)
+
+            # Substitute environment variables
+            servers = self.substitute_env_vars(servers)
+
+            # Print to stdout (not stderr)
+            stdout_console = Console()
+            output = {"mcpServers": servers}
+            stdout_console.print(json.dumps(output, indent=2))
+            return
+
+        # Load lock file
+        self.load_lock_file()
 
         if not profiles:
             console.print("[yellow]No profiles defined in configuration[/yellow]")

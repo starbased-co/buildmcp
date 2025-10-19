@@ -31,6 +31,7 @@ uv run buildmcp --dry-run                      # Preview without executing
 uv run buildmcp --no-check-env                 # Skip env var validation
 uv run buildmcp --force                        # Force write even if unchanged
 uv run buildmcp --mcp-json <path>              # Use custom config file
+uv run buildmcp --profile <name>               # Print built config for profile to stdout
 ```
 
 ## Architecture
@@ -140,6 +141,12 @@ Always use `--dry-run` first to:
 - Verify JSON structure
 - Check environment variable substitution
 - Preview target writes without executing
+
+Use `--profile <name>` to inspect a specific profile's built configuration:
+- Prints the built config to stdout as JSON
+- Performs environment variable substitution
+- Does not write to any targets or update lock files
+- Useful for debugging, piping to other tools, or manual inspection
 
 Use `--force` to override checksum comparison and write anyway.
 

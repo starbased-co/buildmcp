@@ -11,14 +11,13 @@ Build template-based configs, manage servers interactively, and automate deploym
 **[→ Get started in 5 minutes](./QUICKSTART.md)**
 
 ```bash
-# Install
-git clone https://github.com/starbased-co/buildmcp.git
-cd buildmcp && uv sync
+# Install from PyPI
+uv pip install buildmcp
 
 # Choose your tool:
-uv run buildmcp --dry-run      # Template builder
-uv run metamcp                 # Interactive TUI
-uv run metamcp-cli server:list # Command-line interface
+buildmcp --dry-run      # Template builder
+metamcp                 # Interactive TUI
+metamcp-cli server:list # Command-line interface
 ```
 
 ---
@@ -37,6 +36,9 @@ uv run buildmcp --dry-run
 
 # Deploy to targets
 uv run buildmcp
+
+# Print specific profile config (no write)
+uv run buildmcp --profile default
 
 # Force write (skip checksums)
 uv run buildmcp --force
@@ -159,6 +161,21 @@ metamcp-cli namespace:update-tool-status \
 - Python 3.12+
 - [uv](https://github.com/astral-sh/uv) package manager
 
+### Install from PyPI
+
+```bash
+# Install with pip
+pip install buildmcp
+
+# Or with uv (recommended)
+uv pip install buildmcp
+
+# Verify installation
+buildmcp --help
+metamcp --help
+metamcp-cli --help
+```
+
 ### Install from Source
 
 ```bash
@@ -198,13 +215,16 @@ uv run buildmcp --verbose --dry-run
 # 1. Edit templates
 vim ~/.config/nix/config/claude/mcp.json
 
-# 2. Preview
+# 2. Preview specific profile
+uv run buildmcp --profile default
+
+# 3. Preview all (dry-run)
 uv run buildmcp --dry-run
 
-# 3. Deploy
+# 4. Deploy
 uv run buildmcp
 
-# 4. Verify
+# 5. Verify
 cat ~/.claude/mcp.json
 ```
 
@@ -311,6 +331,7 @@ Options:
   --mcp-json PATH     Config file (default: ~/.claude/mcp.json)
   --verbose          Show detailed output
   --dry-run          Preview without writing
+  --profile NAME     Print built config for profile to stdout
   --force            Ignore checksums, redeploy all
   --no-check-env     Skip env var validation
 ```
