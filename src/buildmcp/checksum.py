@@ -4,13 +4,14 @@ from pathlib import Path
 from typing import Any
 
 import dpath
+import pyjson5 as json5
 
 
 def read_json_path(file_path: Path, path: str = ".") -> Any:
-    """Read JSON file and extract value at path.
+    """Read JSON or JSON5 file and extract value at path.
 
     Args:
-        file_path: Path to JSON file
+        file_path: Path to JSON or JSON5 file
         path: jq-style path expression (e.g., '.profiles.default', default '.')
 
     Returns:
@@ -21,7 +22,16 @@ def read_json_path(file_path: Path, path: str = ".") -> Any:
         json.JSONDecodeError: If file contains invalid JSON
         KeyError: If path doesn't exist in JSON
     """
-    data = json.loads(file_path.read_text())
+    content = file_path.read_text()
+
+    # Use JSON5 parser for .json5 files, standard JSON for others
+    if file_path.suffix == ".json5":
+        try:
+            data = json5.loads(content)
+        except (json5.Json5Exception, ValueError) as e:
+            raise json.JSONDecodeError(str(e), content, 0) from e
+    else:
+        data = json.loads(content)
 
     if path == ".":
         return data
@@ -63,7 +73,7 @@ def read_dot_mcp(config_path: Path | None = None, path: str = ".") -> Any:
     """Read MCP configuration from file.
 
     Args:
-        config_path: Path to mcp.json file (defaults to ~/.claude/mcp.json)
+        config_path: Path to mcp.json5 file (defaults to ~/.claude/mcp.json5)
         path: jq-style path expression (e.g., '.profiles', default '.')
 
     Returns:
@@ -71,11 +81,11 @@ def read_dot_mcp(config_path: Path | None = None, path: str = ".") -> Any:
 
     Raises:
         FileNotFoundError: If config file doesn't exist
-        json.JSONDecodeError: If file contains invalid JSON
+        json.JSONDecodeError: If file contains invalid JSON or JSON5
         KeyError: If path doesn't exist
     """
     if config_path is None:
-        config_path = Path.home() / ".claude" / "mcp.json"
+        config_path = Path.home() / ".claude" / "mcp.json5"
     return read_json_path(config_path, path)
 
 
@@ -84,7 +94,7 @@ def write_dot_mcp(data: Any, config_path: Path | None = None, path: str = ".") -
 
     Args:
         data: Configuration data to write
-        config_path: Path to mcp.json file (defaults to ~/.claude/mcp.json)
+        config_path: Path to mcp.json5 file (defaults to ~/.claude/mcp.json5)
         path: jq-style path expression (e.g., '.profiles', default '.')
 
     Raises:
@@ -92,7 +102,7 @@ def write_dot_mcp(data: Any, config_path: Path | None = None, path: str = ".") -
         KeyError: If intermediate path doesn't exist
     """
     if config_path is None:
-        config_path = Path.home() / ".claude" / "mcp.json"
+        config_path = Path.home() / ".claude" / "mcp.json5"
     write_json_path(config_path, data, path)
 
 
@@ -116,15 +126,15 @@ def write_mcp_lock(config_path: Path | None = None) -> None:
     """Generate lock file with hashes of profile configurations.
 
     Args:
-        config_path: Path to mcp.json file (defaults to ~/.claude/mcp.json)
+        config_path: Path to mcp.json5 file (defaults to ~/.claude/mcp.json5)
 
     Raises:
         FileNotFoundError: If config file doesn't exist
-        json.JSONDecodeError: If file contains invalid JSON
+        json.JSONDecodeError: If file contains invalid JSON or JSON5
         OSError: If lock file cannot be written
     """
     if config_path is None:
-        config_path = Path.home() / ".claude" / "mcp.json"
+        config_path = Path.home() / ".claude" / "mcp.json5"
 
     config = read_dot_mcp(config_path)
     profile_hashes = hash_profiles(config)
@@ -137,17 +147,17 @@ def check_mcp_lock(config_path: Path | None = None) -> dict[str, bool]:
     """Check if profile hashes match lock file.
 
     Args:
-        config_path: Path to mcp.json file (defaults to ~/.claude/mcp.json)
+        config_path: Path to mcp.json5 file (defaults to ~/.claude/mcp.json5)
 
     Returns:
         Dict mapping profile names to match status (True if unchanged, False if changed)
 
     Raises:
         FileNotFoundError: If config file doesn't exist
-        json.JSONDecodeError: If file contains invalid JSON
+        json.JSONDecodeError: If file contains invalid JSON or JSON5
     """
     if config_path is None:
-        config_path = Path.home() / ".claude" / "mcp.json"
+        config_path = Path.home() / ".claude" / "mcp.json5"
 
     config = read_dot_mcp(config_path)
     current_hashes = hash_profiles(config)

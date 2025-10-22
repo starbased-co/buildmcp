@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import attrs
+import pyjson5 as json5
 import tyro
 from rich.console import Console
 from rich.panel import Panel
@@ -23,8 +24,8 @@ err_console = Console(stderr=True)
 class MCPBuilder:
     """Manages building and deploying MCP configurations from templates."""
 
-    mcp_json: Path = Path.home() / ".claude/mcp.json"
-    """Path to the MCP configuration file"""
+    mcp_json: Path = Path.home() / ".claude/mcp.json5"
+    """Path to the MCP configuration file (JSON5 format)"""
 
     verbose: bool = False
     """Enable verbose output"""
@@ -51,7 +52,7 @@ class MCPBuilder:
     """Hashes from lock file"""
 
     def load_config(self) -> dict[str, Any]:
-        """Load the MCP configuration from file."""
+        """Load the MCP configuration from JSON5 file."""
         if not self.mcp_json.exists():
             err_console.print(
                 f"[red]Error:[/red] Configuration file not found: {self.mcp_json}"
@@ -59,10 +60,10 @@ class MCPBuilder:
             raise SystemExit(1)
 
         try:
-            with self.mcp_json.open() as f:
-                return json.load(f)
-        except json.JSONDecodeError as e:
-            err_console.print(f"[red]Error parsing JSON:[/red] {e}")
+            content = self.mcp_json.read_text()
+            return json5.loads(content)
+        except (json5.Json5Exception, ValueError) as e:
+            err_console.print(f"[red]Error parsing JSON5:[/red] {e}")
             raise SystemExit(1)
 
     def substitute_env_vars(self, data: Any) -> Any:
@@ -182,7 +183,9 @@ class MCPBuilder:
             return True
 
         try:
-            if isinstance(target_spec, str) and target_spec.endswith(".json"):
+            if isinstance(target_spec, str) and (
+                target_spec.endswith(".json") or target_spec.endswith(".json5")
+            ):
                 target_path = Path(target_spec).expanduser()
                 write_json_path(target_path, servers_json, ".mcpServers")
                 console.print(f"  [green]✓[/green] Wrote to {target_path}")

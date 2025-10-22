@@ -21,6 +21,7 @@ dependencies = [
     "tyro",
     "attrs",
     "dpath>=2.2.0",
+    "pyjson5>=2.0.0",
 ]
 
 [project.urls]
