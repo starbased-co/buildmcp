@@ -112,6 +112,30 @@ class MCPBuilder:
             # Return primitive types as-is
             return data
 
+    def _process_server_config(
+        self, template_key: str, server_config: dict[str, Any]
+    ) -> tuple[str, dict[str, Any]]:
+        """Process server config to extract optional 'name' field.
+
+        Returns tuple of (server_key, processed_config) where:
+        - server_key is the value from 'name' field if present, else template_key
+        - processed_config has 'name' field removed if it was present
+        """
+        import copy
+
+        config = copy.deepcopy(server_config)
+
+        # Check for optional 'name' field
+        if "name" in config:
+            server_key = config.pop("name")
+            if self.verbose:
+                console.print(
+                    f"  [dim]Using custom name '{server_key}' for template '{template_key}'[/dim]"
+                )
+            return server_key, config
+
+        return template_key, config
+
     def build_servers_json(
         self,
         server_names: list[str],
@@ -121,13 +145,18 @@ class MCPBuilder:
         """Build mcpServers JSON from base servers and template servers."""
         import copy
 
-        # Start with base servers from .mcpServers in config
-        servers = copy.deepcopy(base_servers) if base_servers else {}
+        servers = {}
 
-        if base_servers and self.verbose:
-            console.print(
-                f"  [dim]Starting with {len(base_servers)} base server(s)[/dim]"
-            )
+        # Process base servers from .mcpServers in config
+        if base_servers:
+            for key, config in base_servers.items():
+                server_key, processed_config = self._process_server_config(key, config)
+                servers[server_key] = processed_config
+
+            if self.verbose:
+                console.print(
+                    f"  [dim]Starting with {len(base_servers)} base server(s)[/dim]"
+                )
 
         # Add template servers (overriding base if name conflicts)
         for name in server_names:
@@ -137,11 +166,14 @@ class MCPBuilder:
                 )
                 continue
 
-            # Clone the template configuration (deep copy to avoid mutation)
-            servers[name] = copy.deepcopy(templates[name])
+            # Process template configuration (extracts 'name' if present)
+            server_key, processed_config = self._process_server_config(
+                name, templates[name]
+            )
+            servers[server_key] = processed_config
 
             if self.verbose:
-                console.print(f"  [cyan]Added server:[/cyan] {name}")
+                console.print(f"  [cyan]Added server:[/cyan] {server_key}")
 
         return servers
 

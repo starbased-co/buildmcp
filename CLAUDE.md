@@ -120,6 +120,7 @@ Templates go in the config file and should include:
 - Command and arguments
 - Environment variables as `${VAR_NAME}` placeholders
 - Appropriate format for target platform
+- Optional `name` field to specify custom server key in output (the field itself will be removed from output)
 
 ### Configuration Structure Example
 
@@ -142,12 +143,19 @@ Example `mcp.json5` (note JSON5 features: comments, trailing commas):
       command: "...",
       env: { KEY: "${ENV_VAR}" }, // Environment variable substitution
     },
+    // Optional 'name' field for custom server key in output
+    "my-template-key": {
+      name: "custom-server-name", // This value becomes the key in output
+      command: "...",              // The 'name' field itself is removed
+      args: ["..."],
+    },
   },
 
   // Named groups of templates
   profiles: {
     default: ["template1", "template2"],
     minimal: ["template1"],
+    custom: ["my-template-key"], // Output will have "custom-server-name" as key
   },
 
   // Output destinations for each profile
@@ -157,6 +165,7 @@ Example `mcp.json5` (note JSON5 features: comments, trailing commas):
       read: "cat ~/.claude/mcp-minimal.json",
       write: "cat > ~/.claude/mcp-minimal.json",
     },
+    custom: "~/.claude/mcp-custom.json",
   },
 }
 ```

@@ -1,28 +1,20 @@
 [project]
 name = "buildmcp"
-version = "0.2.0"
+version = "0.2.1"
 description = "Build and deploy MCP server configurations from templates"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-authors = [
-    { name = "starbased", email = "s@starbased.net" }
-]
+authors = [{ name = "starbased", email = "s@starbased.net" }]
 keywords = ["mcp", "configuration", "cli", "template"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
 ]
-dependencies = [
-    "rich",
-    "tyro",
-    "attrs",
-    "dpath>=2.2.0",
-    "pyjson5>=2.0.0",
-]
+dependencies = ["rich", "tyro", "attrs", "dpath>=2.2.0", "pyjson5>=2.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/starbased-co/buildmcp"
@@ -40,20 +32,11 @@ build-backend = "hatchling.build"
 packages = ["src/buildmcp"]
 
 [dependency-groups]
-dev = [
-    "pytest>=8.4.2",
-    "pytest-mock>=3.15.1",
-    "twine>=6.2.0",
-]
+dev = ["pytest>=8.4.2", "pytest-mock>=3.15.1", "twine>=6.2.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = [
-    "--color=yes",
-    "--tb=short",
-    "--strict-markers",
-    "--strict-config",
-]
+addopts = ["--color=yes", "--tb=short", "--strict-markers", "--strict-config"]

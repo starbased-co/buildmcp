@@ -217,6 +217,88 @@ class TestBuildServersJson:
             builder.build_servers_json(["server1"], sample_templates, None)
             mock_print.assert_called()
 
+    def test_build_template_with_name_field(self):
+        """Template with 'name' field uses custom server key."""
+        builder = MCPBuilder()
+        templates = {
+            "template-key": {
+                "name": "custom-server-name",
+                "command": "echo",
+                "args": ["test"],
+            }
+        }
+
+        result = builder.build_servers_json(["template-key"], templates, None)
+
+        assert "custom-server-name" in result
+        assert "template-key" not in result
+        assert "name" not in result["custom-server-name"]
+        assert result["custom-server-name"]["command"] == "echo"
+
+    def test_build_base_server_with_name_field(self):
+        """Base server with 'name' field uses custom server key."""
+        builder = MCPBuilder()
+        base = {
+            "base-key": {
+                "name": "renamed-base-server",
+                "command": "base-cmd",
+                "args": ["base"],
+            }
+        }
+
+        result = builder.build_servers_json([], {}, base)
+
+        assert "renamed-base-server" in result
+        assert "base-key" not in result
+        assert "name" not in result["renamed-base-server"]
+        assert result["renamed-base-server"]["command"] == "base-cmd"
+
+    def test_build_mixed_name_field(self):
+        """Mix of servers with and without 'name' field."""
+        builder = MCPBuilder()
+        templates = {
+            "standard": {"command": "cmd1"},
+            "with-name": {"name": "custom-name", "command": "cmd2"},
+        }
+
+        result = builder.build_servers_json(["standard", "with-name"], templates, None)
+
+        assert "standard" in result
+        assert "custom-name" in result
+        assert "with-name" not in result
+        assert len(result) == 2
+
+    def test_build_name_field_deep_copy(self):
+        """Name field extraction doesn't mutate original template."""
+        builder = MCPBuilder()
+        templates = {
+            "template-key": {
+                "name": "custom-name",
+                "command": "echo",
+            }
+        }
+
+        builder.build_servers_json(["template-key"], templates, None)
+
+        assert "name" in templates["template-key"]
+        assert templates["template-key"]["name"] == "custom-name"
+
+    def test_build_name_field_verbose_output(self):
+        """Verbose mode shows custom name usage."""
+        builder = MCPBuilder(verbose=True)
+        templates = {
+            "template-key": {
+                "name": "custom-name",
+                "command": "echo",
+            }
+        }
+
+        with patch("buildmcp.builder.console.print") as mock_print:
+            builder.build_servers_json(["template-key"], templates, None)
+
+            calls = [str(call) for call in mock_print.call_args_list]
+            assert any("custom-name" in str(call) for call in calls)
+
 
 class TestLockFileOperations:
     """Test lock file loading and saving."""

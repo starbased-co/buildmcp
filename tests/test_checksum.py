@@ -129,10 +129,10 @@ class TestMcpHelpers:
     """Test convenience helpers for MCP configuration files."""
 
     def test_read_dot_mcp_default_path(self, tmp_path: Path, monkeypatch):
-        """read_dot_mcp uses ~/.claude/mcp.json by default."""
+        """read_dot_mcp uses ~/.claude/mcp.json5 by default."""
         mcp_dir = tmp_path / ".claude"
         mcp_dir.mkdir()
-        mcp_file = mcp_dir / "mcp.json"
+        mcp_file = mcp_dir / "mcp.json5"
         data = {"profiles": {"default": []}}
         mcp_file.write_text(json.dumps(data))
 
@@ -151,7 +151,7 @@ class TestMcpHelpers:
         assert result == data
 
     def test_write_dot_mcp_default_path(self, tmp_path: Path, monkeypatch):
-        """write_dot_mcp uses ~/.claude/mcp.json by default."""
+        """write_dot_mcp uses ~/.claude/mcp.json5 by default."""
         mcp_dir = tmp_path / ".claude"
         mcp_dir.mkdir()
 
@@ -160,7 +160,7 @@ class TestMcpHelpers:
         data = {"profiles": {}}
         write_dot_mcp(data)
 
-        mcp_file = mcp_dir / "mcp.json"
+        mcp_file = mcp_dir / "mcp.json5"
         result = json.loads(mcp_file.read_text())
         assert result == data
 
