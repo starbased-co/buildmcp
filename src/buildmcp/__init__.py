@@ -1,6 +1,13 @@
 """Build and deploy MCP server configurations from templates."""
 
 from buildmcp.builder import MCPBuilder, main
+from buildmcp.formatters import (
+    FORMATTERS,
+    ClaudeFormatter,
+    CrushFormatter,
+    OutputFormatter,
+    get_formatter,
+)
 from buildmcp.checksum import (
     check_mcp_lock,
     hash_json_data,
@@ -18,6 +25,11 @@ __version__ = "0.1.0"
 __all__ = [
     "MCPBuilder",
     "main",
+    "ClaudeFormatter",
+    "CrushFormatter",
+    "FORMATTERS",
+    "OutputFormatter",
+    "get_formatter",
     "check_mcp_lock",
     "hash_json_data",
     "hash_json_paths",

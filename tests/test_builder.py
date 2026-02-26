@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from buildmcp.builder import MCPBuilder
+from buildmcp.builder import MCPBuilder, TargetSpec
 
 
 class TestLoadConfig:
@@ -370,9 +370,10 @@ class TestWriteTarget:
         """Dry run prints without writing."""
         builder = MCPBuilder(dry_run=True)
         servers = {"server1": {"command": "cmd"}}
+        target = TargetSpec(name="test", path="target.json")
 
         with patch("buildmcp.builder.console.print") as mock_print:
-            result = builder.write_target("target.json", servers)
+            result = builder.write_target(target, servers)
 
             assert result is True
             mock_print.assert_called()
@@ -382,8 +383,9 @@ class TestWriteTarget:
         target_file = tmp_path / "output.json"
         builder = MCPBuilder()
         servers = {"server1": {"command": "cmd"}}
+        target = TargetSpec(name="test", path=str(target_file))
 
-        result = builder.write_target(str(target_file), servers)
+        result = builder.write_target(target, servers)
 
         assert result is True
         assert target_file.exists()
@@ -395,7 +397,7 @@ class TestWriteTarget:
         """Shell command write succeeds."""
         builder = MCPBuilder()
         servers = {"server1": {"command": "cmd"}}
-        target = {"write": "cat > /dev/null"}
+        target = TargetSpec(name="test", write_cmd="cat > /dev/null")
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
@@ -409,7 +411,7 @@ class TestWriteTarget:
         """Shell command with success pattern."""
         builder = MCPBuilder()
         servers = {"server1": {"command": "cmd"}}
-        target = {"write": "echo 'test'"}
+        target = TargetSpec(name="test", write_cmd="echo 'test'")
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = Mock(
@@ -424,7 +426,7 @@ class TestWriteTarget:
         """Shell command write fails."""
         builder = MCPBuilder()
         servers = {"server1": {"command": "cmd"}}
-        target = {"write": "false"}
+        target = TargetSpec(name="test", write_cmd="false")
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = Mock(
@@ -436,11 +438,12 @@ class TestWriteTarget:
             assert result is False
 
     def test_write_invalid_target_spec(self):
-        """Invalid target spec returns False."""
+        """Invalid target spec (no path or write_cmd) returns False."""
         builder = MCPBuilder()
         servers = {"server1": {"command": "cmd"}}
+        target = TargetSpec(name="test")  # No path or write_cmd
 
-        result = builder.write_target(123, servers)  # Invalid spec
+        result = builder.write_target(target, servers)
         assert result is False
 
     def test_write_exception_handling(self, tmp_path: Path):
@@ -448,16 +451,17 @@ class TestWriteTarget:
         builder = MCPBuilder()
         servers = {"server1": {"command": "cmd"}}
         target_file = tmp_path / "test.json"
+        target = TargetSpec(name="test", path=str(target_file))
 
         with patch("buildmcp.builder.write_json_path", side_effect=OSError("error")):
-            result = builder.write_target(str(target_file), servers)
+            result = builder.write_target(target, servers)
             assert result is False
 
     def test_write_verbose_output(self):
         """Verbose mode captures output."""
         builder = MCPBuilder(verbose=True)
         servers = {"server1": {"command": "cmd"}}
-        target = {"write": "echo 'output'"}
+        target = TargetSpec(name="test", write_cmd="echo 'output'")
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="output", stderr="")
@@ -468,7 +472,7 @@ class TestWriteTarget:
         """Success message in stderr handled."""
         builder = MCPBuilder()
         servers = {"server1": {"command": "cmd"}}
-        target = {"write": "test"}
+        target = TargetSpec(name="test", write_cmd="test")
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = Mock(
@@ -485,9 +489,10 @@ class TestProcessTarget:
     def test_process_empty_servers(self, config_file: Path, sample_templates: dict):
         """Empty servers skips processing."""
         builder = MCPBuilder(mcp_json=config_file)
+        target = TargetSpec(name="profile1", path="target.json")
 
         result = builder.process_target(
-            "profile1", [], "target.json", sample_templates, None
+            "profile1", [], target, sample_templates, None
         )
         assert result is True
 
@@ -496,11 +501,12 @@ class TestProcessTarget:
         mock_env(ENV_VAR="value")
         target_file = tmp_path / "output.json"
         builder = MCPBuilder()
+        target = TargetSpec(name="profile1", path=str(target_file))
 
         result = builder.process_target(
             "profile1",
             ["server1"],
-            str(target_file),
+            target,
             sample_templates,
             None,
         )
@@ -513,11 +519,12 @@ class TestProcessTarget:
         target_file = tmp_path / "output.json"
         builder = MCPBuilder(force=True)
         builder._locked_hashes = {"profile1": "matching_hash"}
+        target = TargetSpec(name="profile1", path=str(target_file))
 
         with patch.object(MCPBuilder, "build_servers_json", return_value={"s": {}}):
             with patch.object(MCPBuilder, "write_target", return_value=True) as mock_write:
                 builder.process_target(
-                    "profile1", ["server1"], str(target_file), sample_templates, None
+                    "profile1", ["server1"], target, sample_templates, None
                 )
 
                 mock_write.assert_called_once()
@@ -526,6 +533,7 @@ class TestProcessTarget:
         """Matching hash skips write."""
         builder = MCPBuilder()
         builder._locked_hashes = {"profile1": "abc123"}
+        target = TargetSpec(name="profile1", path="target.json")
 
         with patch.object(MCPBuilder, "build_servers_json", return_value={"s": {}}):
             with patch("buildmcp.builder.hash_json_data", return_value="abc123"):
@@ -533,7 +541,7 @@ class TestProcessTarget:
                     builder.process_target(
                         "profile1",
                         ["server1"],
-                        "target.json",
+                        target,
                         sample_templates,
                         None,
                     )
@@ -547,6 +555,7 @@ class TestProcessTarget:
         target_file = tmp_path / "output.json"
         builder = MCPBuilder()
         builder._locked_hashes = {"profile1": "old_hash"}
+        target = TargetSpec(name="profile1", path=str(target_file))
 
         with patch.object(MCPBuilder, "build_servers_json", return_value={"s": {}}):
             with patch("buildmcp.checksum.hash_json_data", return_value="new_hash"):
@@ -554,7 +563,7 @@ class TestProcessTarget:
                     builder.process_target(
                         "profile1",
                         ["server1"],
-                        str(target_file),
+                        target,
                         sample_templates,
                         None,
                     )
@@ -565,11 +574,12 @@ class TestProcessTarget:
         """First run (no lock hash) triggers write."""
         target_file = tmp_path / "output.json"
         builder = MCPBuilder()
+        target = TargetSpec(name="profile1", path=str(target_file))
 
         with patch.object(MCPBuilder, "build_servers_json", return_value={"s": {}}):
             with patch.object(MCPBuilder, "write_target", return_value=True) as mock_write:
                 builder.process_target(
-                    "profile1", ["server1"], str(target_file), sample_templates, None
+                    "profile1", ["server1"], target, sample_templates, None
                 )
 
                 mock_write.assert_called_once()

@@ -5,7 +5,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import attrs
 import pyjson5 as json5
@@ -15,9 +15,41 @@ from rich.panel import Panel
 from rich.table import Table
 
 from buildmcp.checksum import hash_json_data, write_json_path
+from buildmcp.formatters import get_formatter
 
 console = Console(stderr=True)
 err_console = Console(stderr=True)
+
+
+@attrs.define
+class TargetSpec:
+    """Normalized target specification."""
+
+    name: str
+    format_type: str = "claude"
+    path: str | None = None
+    read_cmd: str | None = None
+    write_cmd: str | None = None
+
+    @classmethod
+    def from_config(cls, name: str, spec: str | dict) -> "TargetSpec":
+        """Parse target spec from config."""
+        if isinstance(spec, str):
+            return cls(name=name, format_type="claude", path=spec)
+
+        format_type = spec.get("type", "claude")
+
+        if "write" in spec:
+            return cls(
+                name=name,
+                format_type=format_type,
+                read_cmd=spec.get("read"),
+                write_cmd=spec["write"],
+            )
+        elif "path" in spec:
+            return cls(name=name, format_type=format_type, path=spec["path"])
+        else:
+            raise ValueError(f"Invalid target spec for '{name}': must have 'path' or 'write'")
 
 
 @attrs.define
@@ -41,6 +73,9 @@ class MCPBuilder:
 
     profile: str | None = None
     """Print built config for specified profile to stdout instead of writing"""
+
+    json_output: Annotated[bool, tyro.conf.arg(name="json")] = False
+    """Output all JSON to stdout in JSONL format"""
 
     _missing_vars: set = attrs.field(factory=set, init=False)
     """Track missing environment variables"""
@@ -203,30 +238,32 @@ class MCPBuilder:
             err_console.print(f"[yellow]Warning:[/yellow] Could not write lock file: {e}")
 
     def write_target(
-        self, target_spec: str | dict[str, str], servers_json: dict[str, Any]
+        self, target: TargetSpec, servers_json: dict[str, Any]
     ) -> bool:
         """Write configuration to target."""
-        json_data = {"mcpServers": servers_json}
+        formatter = get_formatter(target.format_type)
+        json_data = formatter.format(servers_json)
         json_str = json.dumps(json_data, indent=2)
 
         if self.dry_run:
-            console.print(f"[yellow]Would write to:[/yellow] {target_spec}")
+            target_display = target.path or target.write_cmd
+            console.print(f"[yellow]Would write to:[/yellow] {target_display}")
             console.print(Panel(json_str, title="JSON to write", border_style="yellow"))
+            if self.json_output:
+                print(json.dumps({"target": target.name, "config": json_data}))
             return True
 
+        success = False
         try:
-            if isinstance(target_spec, str) and (
-                target_spec.endswith(".json") or target_spec.endswith(".json5")
-            ):
-                target_path = Path(target_spec).expanduser()
-                write_json_path(target_path, servers_json, ".mcpServers")
+            if target.path:
+                target_path = Path(target.path).expanduser()
+                write_json_path(target_path, servers_json, f".{formatter.root_key}")
                 console.print(f"  [green]✓[/green] Wrote to {target_path}")
-                return True
+                success = True
 
-            elif isinstance(target_spec, dict) and "write" in target_spec:
-                write_cmd = target_spec["write"]
+            elif target.write_cmd:
                 result = subprocess.run(
-                    write_cmd,
+                    target.write_cmd,
                     input=json_str,
                     text=True,
                     shell=True,
@@ -251,29 +288,31 @@ class MCPBuilder:
                         console.print(f"[dim]Output:[/dim] {result.stdout}")
                     if result.stderr and has_success_message:
                         console.print(f"  [green]✓[/green] {result.stderr.strip()}")
-                    return True
+                    success = True
                 else:
-                    err_console.print(f"[red]Command failed:[/red] {write_cmd}")
+                    err_console.print(f"[red]Command failed:[/red] {target.write_cmd}")
                     if result.stderr:
                         err_console.print(f"[red]Error:[/red] {result.stderr}")
                     elif result.stdout:
                         err_console.print(f"[red]Output:[/red] {result.stdout}")
-                    return False
             else:
                 err_console.print(
-                    f"[red]Error:[/red] Invalid target specification: {target_spec}"
+                    f"[red]Error:[/red] Invalid target specification: {target.name}"
                 )
-                return False
 
         except Exception as e:
             err_console.print(f"[red]Failed to write target:[/red] {e}")
-            return False
+
+        if success and self.json_output:
+            print(json.dumps({"target": target.name, "config": json_data}))
+
+        return success
 
     def process_target(
         self,
         profile_name: str,
         server_names: list[str],
-        target_spec: str | dict[str, str],
+        target: TargetSpec,
         templates: dict[str, Any],
         base_servers: dict[str, Any] | None = None,
     ) -> bool:
@@ -326,7 +365,7 @@ class MCPBuilder:
 
         # Write to target
         if should_write:
-            return self.write_target(target_spec, servers)
+            return self.write_target(target, servers)
 
         return True
 
@@ -361,9 +400,17 @@ class MCPBuilder:
             # Substitute environment variables
             servers = self.substitute_env_vars(servers)
 
+            # Get formatter based on target type
+            target_config = targets.get(self.profile)
+            if target_config:
+                target = TargetSpec.from_config(self.profile, target_config)
+                formatter = get_formatter(target.format_type)
+            else:
+                formatter = get_formatter("claude")
+
             # Print to stdout (not stderr)
             stdout_console = Console()
-            output = {"mcpServers": servers}
+            output = formatter.format(servers)
             stdout_console.print(json.dumps(output, indent=2))
             return
 
@@ -398,10 +445,11 @@ class MCPBuilder:
                 )
                 continue
 
-            target_spec = targets[profile_name]
+            target_config = targets[profile_name]
+            target = TargetSpec.from_config(profile_name, target_config)
 
             if self.process_target(
-                profile_name, server_names, target_spec, templates, base_servers
+                profile_name, server_names, target, templates, base_servers
             ):
                 success_count += 1
             else:

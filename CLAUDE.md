@@ -6,212 +6,79 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Python CLI tool that builds and deploys MCP server configurations from templates to various targets (Claude Code, MCPNest, etc.). It manages the transformation and deployment of MCP server configurations with environment variable substitution.
 
-**Configuration Format**: The tool uses JSON5 (`.json5`) for input configuration files, which allows:
-- Comments (single-line `//` and multi-line `/* */`)
-- Trailing commas in objects and arrays
-- Unquoted object keys
-- Single-quoted strings
-- Multi-line strings
-
-Output files remain standard JSON for compatibility with MCP clients.
+**Configuration Format**: Uses JSON5 (`.json5`) for input, standard JSON for output. JSON5 allows comments, trailing commas, and unquoted keys.
 
 ## Development Commands
 
-### Setup
 ```bash
-# Create/activate virtual environment
-source .venv/bin/activate  # Automatically activated via .envrc
-
 # Install dependencies
-uv add <package>           # Add new dependencies
-uv sync                    # Install from pyproject.toml
+uv sync
 
 # Run the tool
-uv run python main.py      # Direct execution
-uv run buildmcp            # Via package script
-```
+uv run buildmcp                    # Build and deploy all profiles
+uv run buildmcp --dry-run          # Preview without writing
+uv run buildmcp --verbose          # Show detailed output
+uv run buildmcp --profile <name>   # Print built config for profile to stdout
+uv run buildmcp --force            # Force write (skip checksum comparison)
+uv run buildmcp --no-check-env     # Skip env var validation
+uv run buildmcp --mcp-json <path>  # Use custom config file
 
-### Common Operations
-
-```bash
-# Build and deploy MCP configurations
-uv run buildmcp --verbose                      # Show detailed output
-uv run buildmcp --dry-run                      # Preview without executing
-uv run buildmcp --no-check-env                 # Skip env var validation
-uv run buildmcp --force                        # Force write even if unchanged
-uv run buildmcp --mcp-json <path>              # Use custom config file
-uv run buildmcp --profile <name>               # Print built config for profile to stdout
+# Run tests
+uv run pytest                          # All tests
+uv run pytest tests/test_builder.py    # Single file
+uv run pytest -k "test_name"           # Single test by name
+uv run pytest -x                       # Stop on first failure
 ```
 
 ## Architecture
 
 ### Core Components
 
-#### buildmcp
-
-**MCPBuilder** (`builder.py`): Main class orchestrating the build/deploy process
-- Loads configuration from `~/.config/nix/config/claude/mcp.json5` (JSON5 format)
+**MCPBuilder** (`src/buildmcp/builder.py`): Main orchestrator class
+- Loads configuration from `~/.claude/mcp.json5`
 - Processes profiles → builds server configs → writes to targets
-- Handles environment variable substitution with `${VAR_NAME}` syntax
-- Uses checksums to avoid unnecessary writes
+- Handles `${VAR_NAME}` environment variable substitution
+- Uses SHA-256 checksums to avoid unnecessary writes
 
-**checksum** (`checksum.py`): Provides JSON/JSON5 hashing and lock file utilities
-- Generates SHA256 hashes of built configurations
-- Maintains `.lock` files to track configuration changes (standard JSON format)
-- Supports reading/writing JSON and JSON5 files at specific paths
+**Checksum utilities** (`src/buildmcp/checksum.py`):
+- `hash_json_data()`: Generates SHA-256 hashes of built configurations
+- `read_json_path()` / `write_json_path()`: Read/write JSON with jq-style path access
+- Lock file operations for tracking configuration changes
 
 ### Configuration Flow
 
-1. **Source**: `mcp.json5` (JSON5 format) contains:
-   - `templates`: Reusable MCP server definitions
-   - `profiles`: Named groups of templates to build (formerly `targets`)
-   - `targets`: Output destinations for each profile (formerly `pipes`)
-   - `mcpServers`: Base servers included in all profiles
-
-2. **Build Process**:
-   ```
-   JSON5 Config → Parse → Templates + Base Servers → Environment Substitution → Hash → Compare Lock → Write Target (JSON)
-   ```
-
-3. **Target Types**:
-   - **JSON file path**: Direct write to `.mcpServers` key (e.g., `~/.claude/mcp.json`)
-   - **JSON5 file path**: Direct write to `.mcpServers` key (e.g., `~/.claude/mcp.json5`)
-   - **Shell commands**: Object with `read` and `write` commands
-
-4. **Checksum Flow**:
-   - Load lock file at start (`mcp.lock` next to `mcp.json5`, always JSON format)
-   - For each profile:
-     - Build configuration
-     - Compute SHA256 hash of built servers
-     - Compare with locked hash
-     - Skip write if unchanged (unless `--force`)
-   - Save all profile hashes to lock file at end
-
-**Lock File Format** (`mcp.lock`):
-```json
-{
-  "profile1": "8062a8bb353ca7a0ae506f4f75de7e6ffc1c1228641d0a3b736b8ea277958238",
-  "profile2": "ab260bbff04a7670f3532ba5c36c35cb1f818196cf99ae4f99dbdc495a0aff47"
-}
+```
+mcp.json5 (JSON5) → Parse → Templates + Base Servers → Env Substitution → Hash → Compare Lock → Write Target (JSON)
 ```
 
-### Key Design Patterns
-
-- **Profile Composition**: Profiles combine multiple template servers
-- **Environment Variables**: `${VAR_NAME}` replaced at build time
-- **Checksum Tracking**: Only write when configuration changes (or `--force`)
-- **Lock Files**: `.lock` files store hashes for JSON file targets
-- **Format Conversion**: Claude Code format differs from MCPNest format
-  - Claude: `"type": "stdio"` at top level
-  - MCPNest: `"transport": {"type": "stdio"}` nested
-- **Dry Run Support**: Preview all operations before execution
-- **Missing Variable Tracking**: Collects and reports all missing env vars
-
-## Working with MCP Formats
-
-### Format Differences
-- **Claude Code**: Uses top-level `type` field for transport
-- **MCPNest**: Requires nested `transport` object
-- See `MCP_FORMAT_SPECIFICATION.md` for complete format details
-- See `conversion-examples.json` for transformation examples
-
-### Adding New Templates
-Templates go in the config file and should include:
-- Command and arguments
-- Environment variables as `${VAR_NAME}` placeholders
-- Appropriate format for target platform
-- Optional `name` field to specify custom server key in output (the field itself will be removed from output)
-
-### Configuration Structure Example
-
-Example `mcp.json5` (note JSON5 features: comments, trailing commas):
+### Configuration Structure
 
 ```json5
 {
-  // Base servers included in all profiles
-  mcpServers: {
-    "base-server": { command: "..." },
-  },
-
-  // Reusable template definitions
+  mcpServers: { /* Base servers included in all profiles */ },
   templates: {
-    template1: {
+    "template-name": {
+      name: "custom-output-key",  // Optional: custom key in output
       command: "...",
-      args: ["..."],
-    },
-    template2: {
-      command: "...",
-      env: { KEY: "${ENV_VAR}" }, // Environment variable substitution
-    },
-    // Optional 'name' field for custom server key in output
-    "my-template-key": {
-      name: "custom-server-name", // This value becomes the key in output
-      command: "...",              // The 'name' field itself is removed
-      args: ["..."],
+      env: { KEY: "${ENV_VAR}" },
     },
   },
-
-  // Named groups of templates
   profiles: {
-    default: ["template1", "template2"],
-    minimal: ["template1"],
-    custom: ["my-template-key"], // Output will have "custom-server-name" as key
+    default: ["template1", "template2"],  // Template names to include
   },
-
-  // Output destinations for each profile
   targets: {
-    default: "~/.claude/mcp.json", // Standard JSON output
-    minimal: {
-      read: "cat ~/.claude/mcp-minimal.json",
-      write: "cat > ~/.claude/mcp-minimal.json",
-    },
-    custom: "~/.claude/mcp-custom.json",
+    default: "~/.claude/mcp.json",        // JSON file path
+    // Or shell command:
+    custom: { read: "cmd", write: "cmd" },
   },
 }
 ```
 
-### Testing Configurations
-Always use `--dry-run` first to:
-- Verify JSON5 syntax and structure
-- Check environment variable substitution
-- Preview target writes without executing
+### Target Types
 
-Use `--profile <name>` to inspect a specific profile's built configuration:
-- Prints the built config to stdout as JSON
-- Performs environment variable substitution
-- Does not write to any targets or update lock files
-- Useful for debugging, piping to other tools, or manual inspection
+- **JSON/JSON5 file path**: Direct write to `.mcpServers` key
+- **Shell commands**: Object with `read` and `write` commands (for tools like mcpnest-cli)
 
-Use `--force` to override checksum comparison and write anyway.
+### Lock File
 
-## Project Structure
-
-```
-buildmcp/
-├── src/buildmcp/
-│   ├── __init__.py
-│   ├── __main__.py
-│   ├── builder.py        # MCPBuilder class
-│   └── checksum.py       # Checksum and lock file utilities
-├── tests/                # Test suite (pytest)
-├── pyproject.toml        # Project metadata and dependencies
-└── CLAUDE.md             # This file
-```
-
-### Module Organization
-
-- **buildmcp**: Template-based MCP configuration builder and deployer
-- **Dependencies**: `attrs`, `tyro`, `rich`, `dpath`, `pyjson5`
-
-### Entry Points
-
-```toml
-[project.scripts]
-buildmcp = "buildmcp.builder:main"
-```
-
-### Notes
-
-- **Tests**: Pytest configured in `pyproject.toml`, test files in `tests/`
-- **Configuration**: Config lives in user's nix config directory (`~/.config/nix/config/claude/mcp.json5`)
-- **JSON5 Benefits**: Comments allow documentation, trailing commas prevent merge conflicts, unquoted keys improve readability
+`mcp.lock` (JSON) stores profile name → hash mappings. Profiles are skipped if hash matches unless `--force` is used.
